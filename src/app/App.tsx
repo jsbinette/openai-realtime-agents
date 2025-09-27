@@ -18,21 +18,25 @@ import type { RealtimeAgent } from '@openai/agents/realtime';
 import { useTranscript } from "@/app/contexts/TranscriptContext";
 import { useEvent } from "@/app/contexts/EventContext";
 import { useRealtimeSession } from "./hooks/useRealtimeSession";
+import { useRunsSession } from "./hooks/useRunsSession";
 import { createModerationGuardrail } from "@/app/agentConfigs/guardrails";
 
 // Agent configs
 import { allAgentSets, defaultAgentSetKey } from "@/app/agentConfigs";
+import { taskAgents } from "@/app/agentConfigs/taskAgents";
 import { customerServiceRetailScenario } from "@/app/agentConfigs/customerServiceRetail";
 import { chatSupervisorScenario } from "@/app/agentConfigs/chatSupervisor";
 import { customerServiceRetailCompanyName } from "@/app/agentConfigs/customerServiceRetail";
 import { chatSupervisorCompanyName } from "@/app/agentConfigs/chatSupervisor";
 import { simpleHandoffScenario } from "@/app/agentConfigs/simpleHandoff";
+import { heyGpt } from "@/app/agentConfigs/heyGpt";
 
 // Map used by connect logic for scenarios defined via the SDK.
 const sdkScenarioMap: Record<string, RealtimeAgent[]> = {
   simpleHandoff: simpleHandoffScenario,
   customerServiceRetail: customerServiceRetailScenario,
   chatSupervisor: chatSupervisorScenario,
+  heyGpt: heyGpt,
 };
 
 import useAudioDownload from "./hooks/useAudioDownload";
@@ -59,7 +63,10 @@ function App() {
   const {
     addTranscriptMessage,
     addTranscriptBreadcrumb,
+    transcriptItems,
   } = useTranscript();
+  const transcriptItemsRef = useRef(transcriptItems);
+  useEffect(() => { transcriptItemsRef.current = transcriptItems; }, [transcriptItems]);
   const { logClientEvent, logServerEvent } = useEvent();
 
   const [selectedAgentName, setSelectedAgentName] = useState<string>("");
@@ -100,7 +107,29 @@ function App() {
       handoffTriggeredRef.current = true;
       setSelectedAgentName(agentName);
     },
+    onOutputAudioStopped: () => {
+      // When the realtime agent finishes speaking, invoke the runs agent
+      try {
+        triggerRunAgentFromTranscript();
+      } catch (err) {
+        console.warn('Failed to trigger runs agent:', err);
+      }
+    },
   });
+
+  // Initialize the non-realtime (runs) session at app start. No UI; used for side-effects only.
+  const runs = useRunsSession();
+  const { sendUserText: sendRunUserText } = runs;
+  useEffect(() => {
+    // Connect once on mount
+    runs.connect({
+      initialAgents: taskAgents,
+      extraContext: {
+        addTranscriptBreadcrumb,
+      },
+    }).catch((err) => console.warn('runs connect error', err));
+    return () => runs.disconnect();
+  }, []);
 
   const [sessionStatus, setSessionStatus] =
     useState<SessionStatus>("DISCONNECTED");
@@ -129,6 +158,27 @@ function App() {
     } catch (err) {
       console.error('Failed to send via SDK', err);
     }
+  };
+
+  // Helper to trigger the run agent on realtime output end
+  const triggerRunAgentFromTranscript = () => {
+    // Build a small context from the latest messages using a ref to avoid stale closures
+    const msgs = transcriptItemsRef.current
+      .filter((i) => i.type === 'MESSAGE' && !i.isHidden)
+      .sort((a, b) => a.createdAtMs - b.createdAtMs)
+      .slice(-6);
+
+    const lines = msgs.map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.title ?? ''}`);
+    const contextText = lines.join('\n');
+
+    const input = `You are the display controller. Consider the recent transcript and decide whether to update the UI using your tools. If no update is needed, do nothing.
+
+<transcript>
+${contextText}
+</transcript>`;
+
+    // Fire-and-forget; runs session will handle tracing and tool breadcrumbs
+    sendRunUserText(input);
   };
 
   useHandleSessionHistory();
@@ -279,7 +329,9 @@ function App() {
 
     // Send an initial 'hi' message to trigger the agent to greet the user
     if (shouldTriggerResponse) {
-      sendSimulatedUserMessage('hi');
+      if (!selectedAgentName.toLowerCase().includes("hey")) {
+        sendSimulatedUserMessage('hi');
+      }
     }
     return;
   }

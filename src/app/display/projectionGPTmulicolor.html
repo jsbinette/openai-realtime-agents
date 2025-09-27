@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Procedural Wall — Full‑Range HSV</title>
+<style>
+  html,body,canvas { margin:0; height:100%; width:100%; background:#000; }
+  #ui{ position:fixed; top:1rem; left:1rem; font:14px/1.2 system-ui; color:#cfc; background:rgba(0,0,0,.35); padding:.5rem .75rem; border-radius:.5rem; opacity:0; pointer-events:none; transition:opacity .3s }
+  #ui.visible{ opacity:1; pointer-events:auto }
+  input{ width:220px }
+  label{ display:block; margin:.2rem 0 }
+</style>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <label>Hue (°): <input id="h" type="range" min="0" max="360" value="120"></label>
+  <label>Saturation: <input id="s" type="range" min="0" max="1" step="0.01" value="0.90"></label>
+  <label>Brightness: <input id="v" type="range" min="0" max="1" step="0.01" value="0.60"></label>
+  <label>Motion speed: <input id="spd" type="range" min="0" max="1" step="0.001" value="0.15"></label>
+  <label>Texture strength: <input id="str" type="range" min="0" max="1" step="0.001" value="0.35"></label>
+</div>
+<script>
+const gl = c.getContext('webgl',{antialias:false, depth:false, stencil:false, alpha:false, preserveDrawingBuffer:true});
+const vert = `
+attribute vec2 pos; varying vec2 vUv;
+void main(){ vUv=(pos+1.0)*0.5; gl_Position=vec4(pos,0.,1.); }`;
+const frag = `
+precision highp float;
+varying vec2 vUv;
+uniform vec2  uRes;
+uniform float uTime, uHue, uSat, uVal, uSpeed, uStrength;
+
+// Hash & noise helpers
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
+float noise(vec2 p){
+  vec2 i=floor(p), f=fract(p);
+  float a=hash(i), b=hash(i+vec2(1,0)), c=hash(i+vec2(0,1)), d=hash(i+vec2(1,1));
+  vec2 u=f*f*(3.0-2.0*f);
+  return mix(a,b,u.x)+ (c-a)*u.y*(1.0-u.x) + (d-b)*u.x*u.y;
+}
+float fbm(vec2 p){
+  float s=0., a=0.5;
+  for(int i=0;i<5;i++){ s += a*noise(p); p*=2.02; a*=0.5; }
+  return s;
+}
+vec3 hsv2rgb(vec3 c){
+  vec4 K=vec4(1.,2./3.,1./3.,3.);
+  vec3 p=abs(fract(vec3(c.x)+K.xyz)*6.-K.www);
+  return c.z * mix(K.xxx, clamp(p-K.xxx,0.,1.), c.y);
+}
+
+void main(){
+  // Aspect-correct UV so patterns don’t stretch across ultra-wide canvases
+  vec2 uv = (vUv - 0.5) * vec2(uRes.x/uRes.y, 1.0);
+
+  // Slow domain-warped FBM for subtle, living texture
+  float t = uTime * uSpeed;
+  vec2 q = uv * 0.6;
+  vec2 r = vec2(fbm(q + vec2(0.0, t)), fbm(q + vec2(5.2, -t)));
+  float n = fbm(uv*1.2 + 2.5*r + vec2(t*0.2, -t*0.15));
+
+  // Contrast and strength controls
+  float m = smoothstep(0.2, 0.8, n);
+  float tex = mix(0.0, m, uStrength);
+
+  // Full-range HSV with texture‑modulated value
+  float hue = uHue/360.0;
+  float sat = uSat;
+  float val = clamp(uVal + tex*0.25, 0.0, 1.0);
+  vec3 col = hsv2rgb(vec3(hue, sat, val));
+
+  gl_FragColor = vec4(col, 1.0);
+}`;
+function compile(type,src){ const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(s); return s; }
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, vert));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, frag));
+gl.linkProgram(prog);
+if(!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw gl.getProgramInfoLog(prog);
+gl.useProgram(prog);
+
+// Fullscreen triangle
+const buf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+const loc=gl.getAttribLocation(prog, 'pos'); gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+// Uniforms
+const U = name => gl.getUniformLocation(prog, name);
+const uRes=U('uRes'), uTime=U('uTime'), uHue=U('uHue'), uSat=U('uSat'), uVal=U('uVal'),
+      uSpeed=U('uSpeed'), uStrength=U('uStrength');
+
+function size(){ c.width = innerWidth; c.height = innerHeight; gl.viewport(0,0,c.width,c.height); }
+addEventListener('resize', size); size();
+
+const $ = id => document.getElementById(id);
+const controls = { h:$('h'), s:$('s'), v:$('v'), spd:$('spd'), str:$('str') };
+const ui = $('ui');
+
+const HIDE_DELAY = 3000;
+let hideUiTimer = null;
+
+function showUi(){
+  if(!ui) return;
+  ui.classList.add('visible');
+  if(hideUiTimer) clearTimeout(hideUiTimer);
+  hideUiTimer = setTimeout(() => {
+    ui.classList.remove('visible');
+    hideUiTimer = null;
+  }, HIDE_DELAY);
+}
+
+addEventListener('mousemove', showUi, { passive:true });
+addEventListener('mousedown', showUi);
+addEventListener('touchstart', showUi, { passive:true });
+addEventListener('touchmove', showUi, { passive:true });
+addEventListener('keydown', showUi);
+addEventListener('focusin', showUi);
+
+let start = performance.now();
+(function frame(now){
+  requestAnimationFrame(frame);
+  gl.uniform2f(uRes, c.width, c.height);
+  gl.uniform1f(uTime, (now - start)/1000);
+  gl.uniform1f(uHue, parseFloat(controls.h.value));
+  gl.uniform1f(uSat, parseFloat(controls.s.value));
+  gl.uniform1f(uVal, parseFloat(controls.v.value));
+  gl.uniform1f(uSpeed, parseFloat(controls.spd.value));
+  gl.uniform1f(uStrength, parseFloat(controls.str.value));
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+})();
+</script>
+</body>
+</html>

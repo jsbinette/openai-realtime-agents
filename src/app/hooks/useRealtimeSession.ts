@@ -13,6 +13,7 @@ import { SessionStatus } from '../types';
 export interface RealtimeSessionCallbacks {
   onConnectionChange?: (status: SessionStatus) => void;
   onAgentHandoff?: (agentName: string) => void;
+  onOutputAudioStopped?: () => void;
 }
 
 export interface ConnectOptions {
@@ -29,15 +30,23 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
     SessionStatus
   >('DISCONNECTED');
   const { logClientEvent } = useEvent();
+  const callbacksRef = useRef(callbacks);
+  useEffect(() => { callbacksRef.current = callbacks; }, [callbacks]);
 
   const updateStatus = useCallback(
     (s: SessionStatus) => {
       setStatus(s);
-      callbacks.onConnectionChange?.(s);
+      callbacksRef.current.onConnectionChange?.(s);
       logClientEvent({}, s);
     },
-    [callbacks],
+    [],
   );
+
+  function handleOutputAudioStopped() {
+    // First toggle UI so App knows something happened
+    console.log("[useRealtimeSession] output audio stopped");
+    callbacksRef.current.onOutputAudioStopped?.();
+  }
 
   const { logServerEvent } = useEvent();
 
@@ -58,10 +67,13 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
         historyHandlers.handleTranscriptionDelta(event);
         break;
       }
+      case "output_audio_buffer.stopped": {
+        handleOutputAudioStopped()
+      } 
       default: {
         logServerEvent(event);
         break;
-      } 
+      }
     }
   }
 
@@ -82,7 +94,7 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
     const history = item.context.history;
     const lastMessage = history[history.length - 1];
     const agentName = lastMessage.name.split("transfer_to_")[1];
-    callbacks.onAgentHandoff?.(agentName);
+    callbacksRef.current.onAgentHandoff?.(agentName);
   };
 
   useEffect(() => {
@@ -137,7 +149,7 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
             return pc;
           },
         }),
-        model: 'gpt-4o-realtime-preview-2025-06-03',
+        model: 'gpt-realtime',
         config: {
           inputAudioFormat: audioFormat,
           outputAudioFormat: audioFormat,
@@ -170,7 +182,7 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
   const interrupt = useCallback(() => {
     sessionRef.current?.interrupt();
   }, []);
-  
+
   const sendUserText = useCallback((text: string) => {
     assertconnected();
     sessionRef.current!.sendMessage(text);
