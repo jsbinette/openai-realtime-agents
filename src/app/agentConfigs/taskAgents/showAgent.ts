@@ -1,6 +1,14 @@
-import { Agent, tool } from '@openai/agents';
+import { Agent, tool } from "@openai/agents";
 import type { Socket } from "socket.io-client";
 import { getSocket } from "@/app/lib/socketClient";
+import {
+  DEFAULT_DISPLAY_SIZE,
+  type DisplayMessage,
+  type ListItem,
+  type DisplaySize,
+} from "@/app/types/displayMessage";
+
+type ListItemObject = Exclude<ListItem, string>;
 
 export const showAgent = new Agent({
   name: 'showAgent',
@@ -18,7 +26,8 @@ Your role is to show pertinent information to the user in a graphical format.  T
 - Displaying images from URLs when you are prompted to do so by the handoff agent.
 - Rendering math formulas when you are prompted to do so by the handoff agent.
 
-You use showText, showImage, and showMath tools to accomplish this.
+You use showText for paragraphs, showList for structured bullet lists, showImage, and showMath tools to accomplish this.
+Always send the "size" and "ticker" fields with each tool call (use "medium" and an empty string if you do not need to change them). When calling showList, also provide a "subtitle" (use null when you don't need one) and set "variant" to one of the supported values (use "default" when no special styling is needed).
 These tools will add breadcrumbs to the transcript so you know what is currently being shown to the user.
 
 Whether or not you use the tool, you hand it off to the talking agent after you show something.
@@ -27,44 +36,156 @@ Whether or not you use the tool, you hand it off to the talking agent after you 
   tools: [
     tool({
       name: "showText",
-      description: "This function is responsible for displaying text content.",
+      description: "Display a paragraph of text on the projector screen.",
       parameters: {
         type: "object",
         properties: {
-          text: {
-            description: "An array of strings to show.",
-            type: "array",
-            items: { type: "string" },
+          content: {
+            type: "string",
+            description: "Paragraph or short block of text to render.",
+          },
+          size: {
+            type: "string",
+            description: "Relative text size.",
+            enum: ["tiny", "small", "medium", "large", "huge"],
+          },
+          ticker: {
+            type: "string",
+            description: "Optional ticker text to scroll at the bottom of the display.",
           },
         },
-        required: ["text"],
+        required: ["content", "size", "ticker"],
         additionalProperties: false,
       },
-      execute: async (args: any, details) => {
-        const text = args.text;
-        console.log("showText called with:", text);
-        // describe the shape of your payload
-        interface PushMessage {
-          kind: "text" | "math";
-          content: string;
-          size: "small" | "medium" | "large";
-          ticker: string;
-          ts?: string;
-        }
-
+      execute: async (args: any) => {
         const socket: Socket = getSocket();
-
-        // emit a message
-        const msg: PushMessage = {
-          kind: "text",
-          content: text,
-          size: "medium",
-          ticker: "",
-          ts: new Date().toISOString()
+        const { content, size, ticker } = args as {
+          content: string;
+          size?: DisplaySize;
+          ticker?: string;
         };
 
-        socket.emit("push", msg);
-        return text;
+        if (typeof content !== "string") {
+          throw new Error("showText requires a content string.");
+        }
+
+        const normalizedSize: DisplaySize =
+          typeof size === "string" ? (size as DisplaySize) : DEFAULT_DISPLAY_SIZE;
+        const normalizedTicker =
+          typeof ticker === "string" && ticker.trim() !== "" ? ticker : undefined;
+
+        const message: DisplayMessage = {
+          kind: "text",
+          content,
+          size: normalizedSize,
+          ticker: normalizedTicker,
+          ts: new Date().toISOString(),
+        };
+
+        socket.emit("push", message);
+        return message;
+      },
+    }),
+    tool({
+      name: "showList",
+      description: "Display an ordered set of talking points for the user.",
+      parameters: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            description: "Talking points to display as a list.",
+            items: {
+              anyOf: [
+                { type: "string" },
+                {
+                  type: "object",
+                  properties: {
+                    title: { type: "string" },
+                    subtitle: { type: ["string", "null"] },
+                    variant: {
+                      type: "string",
+                      enum: ["default", "info", "success", "warning", "danger"],
+                    },
+                  },
+                  required: ["title", "subtitle", "variant"],
+                  additionalProperties: false,
+                },
+              ],
+            },
+          },
+          size: {
+            type: "string",
+            description: "Relative text size.",
+            enum: ["tiny", "small", "medium", "large", "huge"],
+          },
+          ticker: {
+            type: "string",
+            description: "Optional ticker text to scroll at the bottom of the display.",
+          },
+        },
+        required: ["items", "size", "ticker"],
+        additionalProperties: false,
+      },
+      execute: async (args: any) => {
+        const socket: Socket = getSocket();
+        const { items, size, ticker } = args as {
+          items: Array<
+            | ListItem
+            | {
+                title: string;
+                subtitle: string | null;
+                variant: ListItemObject["variant"] | null;
+              }
+          >;
+          size?: DisplaySize;
+          ticker?: string;
+        };
+
+        if (!Array.isArray(items)) {
+          throw new Error("showList requires an array of items.");
+        }
+
+        const normalizedItems: ListItem[] = items.map((entry) => {
+          if (typeof entry === "string") {
+            return entry;
+          }
+
+          const normalized: ListItemObject = {
+            title: entry.title,
+          };
+
+          if (typeof entry.subtitle === "string" && entry.subtitle.trim() !== "") {
+            normalized.subtitle = entry.subtitle.trim();
+          }
+
+          if (
+            typeof entry.variant === "string" &&
+            ["default", "info", "success", "warning", "danger"].includes(entry.variant)
+          ) {
+            if (entry.variant !== "default") {
+              normalized.variant = entry.variant as NonNullable<ListItemObject["variant"]>;
+            }
+          }
+
+          return normalized;
+        });
+
+        const normalizedSize: DisplaySize =
+          typeof size === "string" ? (size as DisplaySize) : DEFAULT_DISPLAY_SIZE;
+        const normalizedTicker =
+          typeof ticker === "string" && ticker.trim() !== "" ? ticker : undefined;
+
+        const message: DisplayMessage = {
+          kind: "list",
+          items: normalizedItems,
+          size: normalizedSize,
+          ticker: normalizedTicker,
+          ts: new Date().toISOString(),
+        };
+
+        socket.emit("push", message);
+        return message;
       },
     }),
     tool({
@@ -81,9 +202,18 @@ Whether or not you use the tool, you hand it off to the talking agent after you 
         required: ["url"],
         additionalProperties: false,
       },
-      execute: async (args: any, details) => {
-        const url = args.url;
-        return url;
+      execute: async (args: any) => {
+        const socket: Socket = getSocket();
+        const url = args.url as string;
+
+        const message: DisplayMessage = {
+          kind: "image",
+          url,
+          ts: new Date().toISOString(),
+        };
+
+        socket.emit("push", message);
+        return message;
       },
     }),
     tool({
@@ -100,30 +230,19 @@ Whether or not you use the tool, you hand it off to the talking agent after you 
         required: ["formula"],
         additionalProperties: false,
       },
-      execute: async (args: any, details) => {
-        const formula = args.formula;
-// describe the shape of your payload
-        interface PushMessage {
-          kind: "text" | "math";
-          content: string;
-          size: "small" | "medium" | "large";
-          ticker: string;
-          ts?: string;
-        }
-
+      execute: async (args: any) => {
         const socket: Socket = getSocket();
+        const formula = args.formula as string;
 
-        // emit a message
-        const msg: PushMessage = {
+        const message: DisplayMessage = {
           kind: "math",
-          content: formula,
-          size: "medium",
-          ticker: "",
-          ts: new Date().toISOString()
+          formula,
+          size: DEFAULT_DISPLAY_SIZE,
+          ts: new Date().toISOString(),
         };
 
-        socket.emit("push", msg);
-        return formula;
+        socket.emit("push", message);
+        return message;
       },
     })
   ],

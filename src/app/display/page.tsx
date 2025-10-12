@@ -3,6 +3,13 @@ import Script from "next/script";
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import Head from "next/head";
 import { io } from "socket.io-client";
+import {
+  DEFAULT_DISPLAY_SIZE,
+  isListItemObject,
+  type DisplayMessage,
+  type DisplaySize,
+  type ListItem,
+} from "@/app/types/displayMessage";
 
 type BackgroundConfig = {
   hue: number;
@@ -178,37 +185,67 @@ export default function DisplayPage() {
       }
     };
 
-    const showText = (content: string, size = "medium") => {
+    const resolveSize = (size?: DisplaySize) => size ?? DEFAULT_DISPLAY_SIZE;
+
+    const prepareTextSurface = (size?: DisplaySize, extraClass?: string) => {
       imgEl.classList.remove("fade");
       imgEl.style.display = "none";
       textEl.style.display = "block";
-      textEl.className = `${size} fade`;
+      const classNames = [resolveSize(size), "fade"];
+      if (extraClass) classNames.push(extraClass);
+      textEl.className = classNames.join(" ");
+      textEl.innerHTML = "";
+    };
 
-      let parsed: unknown = null;
-      try {
-        parsed = JSON.parse(content);
-      } catch {
-        parsed = null;
-      }
-
-      if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
-        textEl.innerHTML = `<ul>${parsed.map((line) => `<li>${line}</li>`).join("")}</ul>`;
-      } else if (typeof content === "string" && content.includes("\n")) {
-        const lines = content
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean);
-        textEl.innerHTML = `<ul>${lines.map((line) => `<li>${line}</li>`).join("")}</ul>`;
-      } else {
-        textEl.textContent = content;
-      }
-
+    const renderParagraph = (content: string, size?: DisplaySize) => {
+      prepareTextSurface(size);
+      textEl.textContent = content;
       setTimeout(renderMath, 0);
       applyVisibility();
     };
 
+    const renderMathBlock = (formula: string, size?: DisplaySize) => {
+      prepareTextSurface(size);
+      textEl.textContent = formula;
+      setTimeout(renderMath, 0);
+      applyVisibility();
+    };
+
+    const renderList = (items: ListItem[], size?: DisplaySize) => {
+      prepareTextSurface(size, "list-layout");
+      const list = document.createElement("ul");
+      list.className = "list-layout-list";
+
+      items.forEach((item) => {
+        const li = document.createElement("li");
+        li.className = "list-layout-item";
+
+        if (isListItemObject(item)) {
+          li.classList.add(`variant-${item.variant ?? "default"}`);
+          const titleSpan = document.createElement("span");
+          titleSpan.className = "list-item-title";
+          titleSpan.textContent = item.title;
+          li.appendChild(titleSpan);
+
+          if (item.subtitle) {
+            const subtitleSpan = document.createElement("span");
+            subtitleSpan.className = "list-item-subtitle";
+            subtitleSpan.textContent = item.subtitle;
+            li.appendChild(subtitleSpan);
+          }
+        } else {
+          li.textContent = item;
+        }
+
+        list.appendChild(li);
+      });
+
+      textEl.appendChild(list);
+      applyVisibility();
+    };
+
     const showImage = (url: string) => {
-      textEl.className = textEl.className.replace(/fade/g, "").trim();
+      textEl.className = textEl.className.replace(/fade/g, "").replace(/list-layout/g, "").trim();
       textEl.style.display = "none";
       imgEl.src = url;
       imgEl.className = "fade";
@@ -242,12 +279,28 @@ export default function DisplayPage() {
       if (next) applyBackground(next);
     };
 
-    socket.on("push", (msg: any) => {
-      const { kind, content, size, ticker: tk } = msg;
-      if (kind === "text" || kind === "math") showText(content, size);
-      else if (kind === "image") showImage(content);
-      else if (kind === "background") showBackgroundFromSocket(content);
-      if (typeof tk !== "undefined") setTicker(tk);
+    socket.on("push", (msg: DisplayMessage) => {
+      switch (msg.kind) {
+        case "text":
+          renderParagraph(msg.content, msg.size);
+          break;
+        case "list":
+          renderList(msg.items, msg.size);
+          break;
+        case "math":
+          renderMathBlock(msg.formula, msg.size);
+          break;
+        case "image":
+          showImage(msg.url);
+          break;
+        case "background":
+          showBackgroundFromSocket(msg.content);
+          break;
+        default:
+          console.warn("Unknown display payload", msg);
+      }
+
+      if (typeof msg.ticker !== "undefined") setTicker(msg.ticker);
     });
 
     const onKeyDown = (e: KeyboardEvent) => {
@@ -258,7 +311,7 @@ export default function DisplayPage() {
       if (k === "4") textEl.className = "large";
       if (k === "5") textEl.className = "huge";
       if (k === "c") {
-        showText("", "medium");
+        renderParagraph("", DEFAULT_DISPLAY_SIZE);
         setTicker("");
       }
       if (k === "b") {

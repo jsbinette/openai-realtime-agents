@@ -163,11 +163,33 @@ function App() {
   // Helper to trigger the run agent on realtime output end
   const triggerRunAgentFromTranscript = () => {
     // Build a small context from the latest messages using a ref to avoid stale closures
-    const msgs = transcriptItemsRef.current
+    const orderedMessages = transcriptItemsRef.current
       .filter((i) => i.type === 'MESSAGE' && !i.isHidden)
-      .sort((a, b) => a.createdAtMs - b.createdAtMs)
-      .slice(-6);
+      .sort((a, b) => a.createdAtMs - b.createdAtMs);
 
+    // Skip triggering when the agent's last audio contained no meaningful speech (e.g. heyAgent saying "...")
+    const lastAssistantMessage = [...orderedMessages]
+      .reverse()
+      .find((msg) => msg.role === 'assistant');
+
+    if (!lastAssistantMessage) {
+      return;
+    }
+
+    const rawAssistantText = (lastAssistantMessage.title ?? '').trim();
+    const normalizedAssistantText = rawAssistantText
+      .replace(/\u2026/g, '...')
+      .toLowerCase();
+    const placeholderResponses = new Set(['', '...', '[inaudible]', '[transcribing...]']);
+
+    if (
+      placeholderResponses.has(normalizedAssistantText) ||
+      !/[a-z0-9]/i.test(rawAssistantText)
+    ) {
+      return;
+    }
+
+    const msgs = orderedMessages.slice(-6);
     const lines = msgs.map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.title ?? ''}`);
     const contextText = lines.join('\n');
 

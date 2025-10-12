@@ -1,10 +1,10 @@
 // src/app/agentConfigs/heyGpt/talkingAgent.ts
 "use client";
 import { RealtimeAgent, tool, RealtimeItem } from "@openai/agents/realtime";
-import { webSearchTool } from "@openai/agents"
 import type { Socket } from "socket.io-client";
 import { getSocket } from "@/app/lib/socketClient";
-import { address, people } from './privateData.sample';
+import { address, people } from './privateData';
+import { DEFAULT_DISPLAY_SIZE, type DisplayMessage } from "@/app/types/displayMessage";
 
 export const talkingAgent = new RealtimeAgent({
   name: 'talkingAgent',
@@ -178,7 +178,7 @@ ${people}
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ model: "gpt-5", input: messages }),
+          body: JSON.stringify({ model: "gpt-5", service_tier: "priority", input: messages }),
         });
 
         if (!response.ok) {
@@ -191,30 +191,17 @@ ${people}
           .find((i: any) => i.type === 'message' && i.role === 'assistant')
           ?.content?.find((c: any) => c.type === 'output_text')?.text ?? '';
 
-
-
-        // describe the shape of your payload
-        interface PushMessage {
-          kind: "text" | "math";
-          content: string;
-          size: "small" | "medium" | "large";
-          ticker: string;
-          ts?: string;
-        }
-
         const socket: Socket = getSocket();
 
-        // emit a message
-        const msg: PushMessage = {
+        const message: DisplayMessage = {
           kind: "text",
           content: text,
-          size: "medium",
-          ticker: "",
-          ts: new Date().toISOString()
+          size: DEFAULT_DISPLAY_SIZE,
+          ts: new Date().toISOString(),
         };
 
-        socket.emit("push", msg);
-        return;
+        socket.emit("push", message);
+        return message;
       },
     }),
     tool({
@@ -231,7 +218,7 @@ ${people}
         required: ["query"],
         additionalProperties: false,
       },
-      execute: async (args: any, details) => {
+      execute: async (args: any, _details) => {
         const query = args.query;
         let response: Response;
   
@@ -242,7 +229,7 @@ ${people}
             headers: {
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({ model: "gpt-5", tools: [{ type: "web_search" }], input: query }),
+            body: JSON.stringify({ model: "gpt-5", service_tier: "priority", tools: [{ type: "web_search" }], input: query }),
           });
         } catch (err) {
           console.warn("Network error calling /api/responses:", err);

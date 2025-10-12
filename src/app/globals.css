@@ -102,6 +102,15 @@ select.input {
 #stage { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; padding:4vh; z-index:1; }
 #box { max-width: 92vw; max-height: 90vh; text-align:center; }
 #text { line-height:1.2; word-wrap:break-word; }
+#text.list-layout { display:flex; flex-direction:column; align-items:center; justify-content:center; }
+#text.list-layout .list-layout-list { list-style:none; margin:0 auto; padding:0; display:flex; flex-direction:column; gap:2.4vh; max-width:80vw; }
+#text.list-layout .list-layout-item { text-align:center; line-height:1.25; }
+#text.list-layout .list-item-title { font-weight:600; }
+#text.list-layout .list-item-subtitle { font-weight:400; opacity:0.85; margin-top:0.6vh; font-size:0.6em; }
+#text.list-layout .list-layout-item.variant-info .list-item-title { color:#7dd3fc; }
+#text.list-layout .list-layout-item.variant-success .list-item-title { color:#86efac; }
+#text.list-layout .list-layout-item.variant-warning .list-item-title { color:#facc15; }
+#text.list-layout .list-layout-item.variant-danger .list-item-title { color:#f87171; }
 #img { max-width: 92vw; max-height: 90vh; display:none; }
 .tiny { font-size: 2.5vh; }
 .small { font-size: 4vh; }
