@@ -18,12 +18,12 @@ export const talkingAgent = new RealtimeAgent({
 You are a calm, approachable home assistant who’s also a dedicated general knowledge expert and try to provide helpful information and support.  If and when the user ask for assistance to things about the home, you pass it to the relevant specialized agent.
 
 ## Task
-Always answer user questions.
-
-Your primary is role is to talk with the user about the world and their preocupation, while keeping an eye for the opportunity to hand it off to a specialized agent if household assistance is needed.
-You can use the webSearch tool to find information and answer questions.
-Respond right away with a short answer to the user request, no chit chat.
-Do not use filler words or unnecessary phrases. No "if there's any else...". No "I can provide more information."...
+- Always answer user questions.
+- Your primary role is to talk with the user about the world and their preocupation, while keeping an eye for the opportunity to hand it off to a specialized agent if household assistance is needed.
+- You can use the webSearch tool to find information and answer questions.
+- Respond right away with a short answer to the user request, no chit chat.
+- Do not use filler words or unnecessary phrases. No "if there's any else...". No "I can provide more information."...
+- When you hear single word utterances that are not in the language of the conversation, especially if it does not make sense in context, respond with only with "..." and ignore it in the conversation.
 
 
 If you hear "Thank you, GPT", you should immediately hand off to the heyAgent without any additional commentary.
@@ -84,126 +84,6 @@ ${people}
 
   tools: [
     //webSearchTool(),
-    tool({
-      name: "talkingPoints",
-      description:
-        `Summarizes the key points discussed in the last assistant comment.
-            # Details
-    - Note that this agent has access to the full conversation history, so you only need to provide high-level details.`,
-      parameters: {
-        type: "object",
-        properties: {
-          text: {
-            type: "string",
-            description: "The text content to summarize",
-          },
-        },
-        required: [],
-        additionalProperties: false,
-      },
-      execute: async (text2: any, details) => {
-        const history: RealtimeItem[] = (details?.context as any)?.history ?? [];
-        const filteredLogs = history.filter((log) => log.type === 'message');
-        const messages = [
-          {
-            role: "system",
-            content:
-              `You are an an expert a writing bullet points of assistant messages.
-                  Assume you are writing a talking points card if the user was going to talk about it.
-                  Return your consice summary which will then be output on a projector screen.
-
-                  Your answers are plain text or arrays of small bullet points.
-
-                  Example 1:
-                  
-                  prompt: "What’s a direct flight from America to Marrakech?"
-
-                  answer: "For direct flights from the United States to Marrakech, United Airlines offers a non-stop route from Newark Liberty International Airport (EWR) to Marrakesh Menara Airport (RAK). This service commenced on October 24, 2024, operating three times weekly—on Sundays, Wednesdays, and Fridays—using Boeing 767-300 aircraft.  The flight duration is approximately 7 hours and 35 minutes.
-                              Additionally, Delta Airlines provides a seasonal direct flight from Hartsfield-Jackson Atlanta International Airport (ATL) to Marrakech. This route typically operates from October through February, with a flight time of around 11 hours and 5 minutes.
-                              Please note that these direct flights are seasonal and may not be available year-round. It’s advisable to check the airlines’ official websites or consult with a travel agent for the most current schedules and availability."
-
-                  talkingPoints: ["– United: Newark (EWR) → Marrakech (RAK)",
-                                 "– Delta: Atlanta (ATL) → Marrakech (seasonal)",
-                                 "– ~7.5–11 hrs | Wide-body aircraft"]
-                  Example 2:
-
-                  prompt: "What is the quadratic equation?"
-
-                  answer:  "The quadratic equation refers to the standard form of a second-degree polynomial:
-
-                  ax^2 + bx + c = 0
-
-                  Where:
-
-                    •	a, b, and c are constants (with a \ne 0),
-                    •	x is the variable.
-
-                  To solve it, you use the quadratic formula:
-
-                  x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
-
-                  The discriminant \Delta = b^2 - 4ac determines the nature of the roots:
-                    •	\Delta > 0: two real and distinct solutions,
-                    •	\Delta = 0: one real repeated solution,
-                    •	\Delta < 0: two complex conjugate solutions.
-
-                  If you have a specific equation in mind, I can solve it explicitly."],
-
-                  talkingPoints: ["– Standard form: ax^2 + bx + c = 0",
-                      "– Quadratic formula: x = [-b ± √(b² - 4ac)] / 2a",
-                      "– Discriminant (Δ = b² - 4ac) indicates root nature"]
-                  
-
-                  ONLY include VERBAL information from the LAST message in the transcript.
-
-                  `,
-          },
-          {
-            role: "user",
-            content: `Carefully consider the context provided,  
-    <modelContext>
-    
-    </modelContext>
-    
-    <conversationContext>
-    ${JSON.stringify(filteredLogs.slice(-4), null, 2)}
-    </conversationContext>
-    
-    `,
-          },
-        ];
-
-        const response = await fetch("/api/responses", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ model: "gpt-5", service_tier: "priority", input: messages }),
-        });
-
-        if (!response.ok) {
-          console.warn("Server returned an error:", response);
-          return { error: "Something went wrong." };
-        }
-
-        const { output = [] } = await response.json();
-        const text = output
-          .find((i: any) => i.type === 'message' && i.role === 'assistant')
-          ?.content?.find((c: any) => c.type === 'output_text')?.text ?? '';
-
-        const socket: Socket = getSocket();
-
-        const message: DisplayMessage = {
-          kind: "text",
-          content: text,
-          size: DEFAULT_DISPLAY_SIZE,
-          ts: new Date().toISOString(),
-        };
-
-        socket.emit("push", message);
-        return message;
-      },
-    }),
     tool({
       name: "webSearch",
       description: "Searches the web for up-to-date information.",
