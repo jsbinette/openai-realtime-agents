@@ -14,6 +14,7 @@ export interface RealtimeSessionCallbacks {
   onConnectionChange?: (status: SessionStatus) => void;
   onAgentHandoff?: (agentName: string) => void;
   onOutputAudioStopped?: () => void;
+  onResponseAudioTranscriptDone?: (event: any) => void;
 }
 
 export interface ConnectOptions {
@@ -61,6 +62,7 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
       }
       case "response.audio_transcript.done": {
         historyHandlers.handleTranscriptionCompleted(event);
+        callbacksRef.current.onResponseAudioTranscriptDone?.(event);
         break;
       }
       case "response.audio_transcript.delta": {

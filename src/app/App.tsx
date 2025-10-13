@@ -107,8 +107,8 @@ function App() {
       handoffTriggeredRef.current = true;
       setSelectedAgentName(agentName);
     },
-    onOutputAudioStopped: () => {
-      // When the realtime agent finishes speaking, invoke the runs agent
+    onResponseAudioTranscriptDone: () => {
+      // When the realtime agent finishes a transcript, invoke the runs agent
       try {
         triggerRunAgentFromTranscript();
       } catch (err) {
